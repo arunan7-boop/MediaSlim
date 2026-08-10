@@ -8,3 +8,4 @@ name = "mediaslim-production"
 [vars]
 VITE_FIREBASE_API_KEY = "dummy-value-provided-in-dashboard"
 VITE_FIREBASE_AUTH_DOMAIN = "mediaslim.app"
+VITE_GOOGLE_CLIENT_ID = "295591804817-lcdso97bf7eadeqs750dn5gubg4jh9kf.apps.googleusercontent.com"
