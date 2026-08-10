@@ -6,7 +6,7 @@ import { Storage } from '@google-cloud/storage';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || '3000', 10);
 
   // Increase payload limit for base64 image inspection
   app.use(express.json({ limit: '25mb' }));
