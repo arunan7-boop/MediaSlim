@@ -30,7 +30,9 @@ import {
   CompressionSettings,
   CropRect,
   MediaItem,
-  ProgressStage
+  OutputFormat,
+  ProgressStage,
+  RenamePatternSettings
 } from './types';
 import {
   compressImage,
@@ -42,13 +44,15 @@ import {
 } from './utils/videoCompressor';
 import {
   calculateUsedVaultStorage,
-  DEFAULT_QUOTA_BYTES,
   getStoredCloudFiles,
-  getVaultSettings,
   uploadToCloudVault
 } from './utils/cloudStorage';
-import { formatBytes } from './utils/formatters';
-import { Sparkles, ShieldCheck, Zap, DownloadCloud, RefreshCw } from 'lucide-react';
+import {
+  computeFormattedFilename
+} from './utils/renameUtils';
+import { Sparkles } from 'lucide-react';
+import { auth, loginWithGoogle, logout } from './utils/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 const DEFAULT_SETTINGS: CompressionSettings = {
   quality: 75,
@@ -56,7 +60,9 @@ const DEFAULT_SETTINGS: CompressionSettings = {
   keepAspectRatio: true,
   outputFormat: 'webp',
   aspectRatio: 'original',
-  videoFps: 30
+  videoFps: 30,
+  smartAiEnabled: false,
+  autoCleanup: false
 };
 
 export default function App() {
@@ -74,9 +80,14 @@ export default function App() {
   const [isCloudVaultOpen, setIsCloudVaultOpen] = useState<boolean>(false);
   const [cloudFiles, setCloudFiles] = useState<CloudStoredFile[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
     setCloudFiles(getStoredCloudFiles());
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
   }, []);
 
   const showToast = (msg: string) => {
@@ -149,11 +160,10 @@ export default function App() {
     const targetItem = queue.find((i) => i.id === itemId);
     if (!targetItem) return;
 
-    // Update status to processing
     setQueue((prev) =>
       prev.map((i) =>
         i.id === itemId
-          ? { ...i, status: 'processing', progress: { stage: 'reading', progress: 5, message: 'Starting...' } }
+          ? { ...i, status: 'processing', progress: { stage: 'reading', progress: 5, message: 'Compressing...' } }
           : i
       )
     );
@@ -244,6 +254,90 @@ export default function App() {
     showToast('Batch processing complete!');
   };
 
+  // Bulk renaming state handlers
+  const handleUpdateItemName = (id: string, newName: string | undefined) => {
+    setQueue((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, customName: newName } : item))
+    );
+    showToast('Updated item output filename');
+  };
+
+  const handleApplyBulkRenamePattern = (pattern: RenamePatternSettings) => {
+    setQueue((prev) =>
+      prev.map((item, index) => {
+        const formatted = computeFormattedFilename(item, index, pattern);
+        const ext = item.settings.outputFormat;
+        const baseWithoutExt = formatted.endsWith(`.${ext}`)
+          ? formatted.slice(0, -(ext.length + 1))
+          : formatted;
+        return { ...item, customName: baseWithoutExt };
+      })
+    );
+    showToast('Applied bulk rename rules to queue');
+  };
+
+  const handleResetAllNames = () => {
+    setQueue((prev) => prev.map((item) => ({ ...item, customName: undefined })));
+    showToast('Reset output filenames to default');
+  };
+
+  // Batch format conversion handler for selected items
+  const handleConvertItemFormats = async (
+    itemIds: string[],
+    targetFormat: OutputFormat,
+    autoProcess: boolean = false
+  ) => {
+    if (itemIds.length === 0) return;
+
+    setQueue((prev) =>
+      prev.map((item) => {
+        if (itemIds.includes(item.id)) {
+          return {
+            ...item,
+            settings: {
+              ...item.settings,
+              outputFormat: targetFormat
+            },
+            status: 'pending',
+            compressedBlob: undefined,
+            compressedUrl: undefined,
+            compressedSize: undefined,
+            errorMessage: undefined,
+            progress: { stage: 'idle', progress: 0 }
+          };
+        }
+        return item;
+      })
+    );
+
+    showToast(`Converted ${itemIds.length} file(s) to ${targetFormat.toUpperCase()}`);
+
+    if (autoProcess) {
+      setIsProcessingBatch(true);
+      for (const id of itemIds) {
+        await processSingleItem(id);
+      }
+      setIsProcessingBatch(false);
+      showToast('Finished processing converted files!');
+    }
+  };
+
+  const handleRemoveMultipleItems = (itemIds: string[]) => {
+    if (itemIds.length === 0) return;
+    setQueue((prev) => prev.filter((item) => !itemIds.includes(item.id)));
+    showToast(`Removed ${itemIds.length} item(s) from queue`);
+  };
+
+  const handleProcessMultipleItems = async (itemIds: string[]) => {
+    if (itemIds.length === 0) return;
+    setIsProcessingBatch(true);
+    for (const id of itemIds) {
+      await processSingleItem(id);
+    }
+    setIsProcessingBatch(false);
+    showToast(`Processed ${itemIds.length} selected item(s)`);
+  };
+
   // Download All as ZIP Archive
   const handleDownloadAllZip = async () => {
     const completedItems = queue.filter((i) => i.status === 'completed' && i.compressedBlob);
@@ -257,9 +351,8 @@ export default function App() {
     for (let i = 0; i < completedItems.length; i++) {
       const item = completedItems[i];
       if (item.compressedBlob) {
-        const ext = item.settings.outputFormat;
-        const baseName = item.name.substring(0, item.name.lastIndexOf('.')) || item.name;
-        const zipFileName = `slim_${baseName}.${ext}`;
+        const itemIdx = queue.findIndex((q) => q.id === item.id);
+        const zipFileName = computeFormattedFilename(item, itemIdx >= 0 ? itemIdx : i);
         zip.file(zipFileName, item.compressedBlob);
       }
     }
@@ -282,7 +375,14 @@ export default function App() {
 
     setIsDownloadingZip(false);
     setZipProgress(0);
-    showToast('Downloaded ZIP bundle!');
+
+    if (globalSettings.autoCleanup) {
+      const completedIds = new Set(completedItems.map((i) => i.id));
+      setQueue((prev) => prev.filter((i) => !completedIds.has(i.id)));
+      showToast('Downloaded ZIP bundle & auto-cleaned workspace!');
+    } else {
+      showToast('Downloaded ZIP bundle with renamed files!');
+    }
   };
 
   // Save to Cloud Storage Vault
@@ -290,12 +390,20 @@ export default function App() {
     if (!item.compressedBlob) return;
 
     try {
-      const cloudFile = await uploadToCloudVault(item);
+      const itemIdx = queue.findIndex((q) => q.id === item.id);
+      const customFilename = computeFormattedFilename(item, itemIdx >= 0 ? itemIdx : 0);
+      const cloudFile = await uploadToCloudVault(item, undefined, customFilename);
       setCloudFiles((prev) => [cloudFile, ...prev]);
-      setQueue((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, savedToCloud: true, cloudFileId: cloudFile.id } : i))
-      );
-      showToast(`Saved ${item.name} to Cloud Vault`);
+
+      if (globalSettings.autoCleanup || item.settings.autoCleanup) {
+        setQueue((prev) => prev.filter((i) => i.id !== item.id));
+        showToast(`Saved ${customFilename} to Cloud Vault & auto-cleaned from workspace`);
+      } else {
+        setQueue((prev) =>
+          prev.map((i) => (i.id === item.id ? { ...i, savedToCloud: true, cloudFileId: cloudFile.id } : i))
+        );
+        showToast(`Saved ${customFilename} to Cloud Vault`);
+      }
     } catch (err) {
       console.error('Cloud upload error:', err);
       showToast('Failed to save to Cloud Storage Vault');
@@ -309,7 +417,6 @@ export default function App() {
         ...item,
         settings: {
           ...globalSettings,
-          // Preserve appropriate format if item is video vs image
           outputFormat:
             item.type === 'video'
               ? globalSettings.outputFormat === 'mp4'
@@ -324,9 +431,8 @@ export default function App() {
 
   const handleDownloadItem = (item: MediaItem) => {
     if (!item.compressedUrl) return;
-    const ext = item.settings.outputFormat;
-    const baseName = item.name.substring(0, item.name.lastIndexOf('.')) || item.name;
-    const fileName = `slim_${baseName}.${ext}`;
+    const itemIdx = queue.findIndex((q) => q.id === item.id);
+    const fileName = computeFormattedFilename(item, itemIdx >= 0 ? itemIdx : 0);
 
     const link = document.createElement('a');
     link.href = item.compressedUrl;
@@ -334,6 +440,13 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    if (globalSettings.autoCleanup || item.settings.autoCleanup) {
+      setTimeout(() => {
+        setQueue((prev) => prev.filter((i) => i.id !== item.id));
+        showToast(`Downloaded ${fileName} & auto-cleaned from workspace`);
+      }, 400);
+    }
   };
 
   const handleSaveCrop = (cropRect: CropRect | undefined, aspect: AspectRatioPreset) => {
@@ -367,6 +480,7 @@ export default function App() {
 
   const queueHasImages = queue.some((i) => i.type === 'image');
   const queueHasVideos = queue.some((i) => i.type === 'video');
+  const sampleImageItem = queue.find((i) => i.type === 'image') || null;
 
   const vaultStats = calculateUsedVaultStorage(cloudFiles);
   const totalSavedBytes = queue.reduce((acc, i) => {
@@ -377,11 +491,11 @@ export default function App() {
   }, 0);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white flex flex-col">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-slate-900 selection:text-white flex flex-col">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-20 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-slate-900 border border-indigo-500/40 text-slate-100 text-xs font-semibold shadow-2xl animate-bounce">
-          <Sparkles className="w-4 h-4 text-amber-400" />
+        <div className="fixed top-20 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-slate-900 text-white text-xs font-bold shadow-2xl animate-bounce">
+          <Sparkles className="w-4 h-4 text-amber-300" />
           <span>{toastMessage}</span>
         </div>
       )}
@@ -394,6 +508,9 @@ export default function App() {
         queueCount={queue.length}
         completedCount={queue.filter((i) => i.status === 'completed').length}
         totalBytesSaved={totalSavedBytes}
+        user={user}
+        onLogin={loginWithGoogle}
+        onLogout={logout}
       />
 
       {/* Main Container */}
@@ -405,13 +522,14 @@ export default function App() {
           uploadProgress={uploadProgress}
         />
 
-        {/* Compression Controls */}
+        {/* Compression Controls with Smart AI Toggle */}
         <CompressionControls
           settings={globalSettings}
           onChangeSettings={setGlobalSettings}
           onApplyToAll={handleApplySettingsToAll}
           queueHasImages={queueHasImages}
           queueHasVideos={queueHasVideos}
+          sampleItem={sampleImageItem}
         />
 
         {/* Media Queue List */}
@@ -423,6 +541,12 @@ export default function App() {
           onOpenCropEditor={(item) => setCropModalItem(item)}
           onSaveItemToCloud={handleSaveToCloud}
           onDownloadItem={handleDownloadItem}
+          onUpdateItemName={handleUpdateItemName}
+          onApplyBulkRename={handleApplyBulkRenamePattern}
+          onResetAllNames={handleResetAllNames}
+          onConvertItemFormats={handleConvertItemFormats}
+          onRemoveMultipleItems={handleRemoveMultipleItems}
+          onProcessMultipleItems={handleProcessMultipleItems}
         />
 
         {/* Batch Summary Floating Bar */}
@@ -434,6 +558,7 @@ export default function App() {
           isProcessingBatch={isProcessingBatch}
           isDownloadingZip={isDownloadingZip}
           zipProgress={zipProgress}
+          autoCleanup={globalSettings.autoCleanup}
         />
       </main>
 
@@ -475,8 +600,8 @@ export default function App() {
       )}
 
       {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-500">
-        <p>MediaSlim — High Efficiency Image & Video Compression Tool</p>
+      <footer className="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500 font-medium">
+        <p>MEDIASLIM Studio — Clean Minimalist Batch Media File Size Reducer</p>
       </footer>
     </div>
   );

@@ -1,6 +1,1 @@
-{
-  "name": "MediaSlim - Image & Video Compressor",
-  "description": "Batch image and video file size reducer with customizable quality, target resolution, aspect ratio cropping, side-by-side comparison preview, progress tracking, and secure cloud storage.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
+{"name":"MediaSlim - Image \u0026 Video Compressor","description":"Batch image and video file size reducer with customizable quality, target resolution, aspect ratio cropping, bulk file renaming rules, side-by-side comparison preview, progress tracking, and secure cloud storage.","requestFramePermissions":[],"majorCapabilities":["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]}

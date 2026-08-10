@@ -44,6 +44,11 @@ export interface CompressionSettings {
   cropRect?: CropRect;
   videoFps?: number; // 24, 30, 60
   videoBitrateScale?: number; // 0.2 to 1.0
+  smartAiEnabled?: boolean;
+  autoCleanup?: boolean;
+  aiSuggestedQuality?: number;
+  aiReasoning?: string;
+  aiComplexityLevel?: string;
 }
 
 export type ProcessingStatus = 'queued' | 'uploading' | 'processing' | 'completed' | 'error';
@@ -66,10 +71,22 @@ export interface ProgressState {
   message?: string;
 }
 
+export interface RenamePatternSettings {
+  prefix: string;
+  useOriginalName: boolean;
+  customBaseName: string;
+  suffix: string;
+  enableSequential: boolean;
+  startIndex: number;
+  numberPadding: number; // e.g. 1 ('1'), 2 ('01'), 3 ('001'), 4 ('0001')
+  caseOption: 'preserve' | 'lowercase' | 'uppercase';
+}
+
 export interface MediaItem {
   id: string;
   file: File;
   name: string;
+  customName?: string; // User-edited or bulk-renamed filename (without extension)
   type: MediaType;
   originalSize: number;
   originalUrl: string;
@@ -112,4 +129,12 @@ export interface CloudVaultSettings {
   isPinProtected: boolean;
   pinHash?: string;
   storageQuotaBytes: number; // e.g. 1 GB = 1073741824
+  gcsBucketName?: string;
+  gcsRegion?: string;
+  gcsCustomDomain?: string;
+  gcsConnected?: boolean;
+  cloudRunRegion?: string;
+  cloudRunServiceUrl?: string;
+  cloudflareDomain?: string;
+  cloudflareCdnEnabled?: boolean;
 }

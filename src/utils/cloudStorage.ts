@@ -15,7 +15,15 @@ export function getVaultSettings(): CloudVaultSettings {
   }
   return {
     isPinProtected: false,
-    storageQuotaBytes: DEFAULT_QUOTA_BYTES
+    storageQuotaBytes: DEFAULT_QUOTA_BYTES,
+    gcsBucketName: 'mediaslim-vault-bucket',
+    gcsRegion: 'us-central1',
+    gcsCustomDomain: 'cdn.mediaslim.app',
+    gcsConnected: true,
+    cloudRunRegion: 'us-central1',
+    cloudRunServiceUrl: 'https://mediaslim-app-uc.a.run.app',
+    cloudflareDomain: 'cdn.mediaslim.app',
+    cloudflareCdnEnabled: true
   };
 }
 
@@ -49,7 +57,8 @@ export function saveStoredCloudFiles(files: CloudStoredFile[]): void {
 
 export async function uploadToCloudVault(
   item: MediaItem,
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  customFilename?: string
 ): Promise<CloudStoredFile> {
   if (!item.compressedBlob) {
     throw new Error('Item has no compressed output to upload');
@@ -68,9 +77,11 @@ export async function uploadToCloudVault(
 
   const shareToken = Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
 
+  const finalName = customFilename || (item.customName ? (item.customName.endsWith(`.${item.settings.outputFormat}`) ? item.customName : `${item.customName}.${item.settings.outputFormat}`) : item.name);
+
   const newCloudFile: CloudStoredFile = {
     id: `cloud_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-    name: item.name,
+    name: finalName,
     type: item.type,
     originalSize: item.originalSize,
     compressedSize: item.compressedSize || item.compressedBlob.size,
