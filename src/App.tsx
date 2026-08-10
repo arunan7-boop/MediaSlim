@@ -51,8 +51,6 @@ import {
   computeFormattedFilename
 } from './utils/renameUtils';
 import { Sparkles } from 'lucide-react';
-import { auth, loginWithGoogle, logout } from './utils/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
 
 const DEFAULT_SETTINGS: CompressionSettings = {
   quality: 75,
@@ -84,10 +82,6 @@ export default function App() {
 
   useEffect(() => {
     setCloudFiles(getStoredCloudFiles());
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
   }, []);
 
   const showToast = (msg: string) => {
@@ -509,8 +503,8 @@ export default function App() {
         completedCount={queue.filter((i) => i.status === 'completed').length}
         totalBytesSaved={totalSavedBytes}
         user={user}
-        onLogin={loginWithGoogle}
-        onLogout={logout}
+        onLoginSuccess={(userInfo) => setUser(userInfo)}
+        onLogout={() => setUser(null)}
       />
 
       {/* Main Container */}

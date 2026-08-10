@@ -1,6 +1,7 @@
 import React from 'react';
 import { Cloud, Sliders, HardDrive, Sparkles, ShieldCheck } from 'lucide-react';
 import { formatBytes } from '../utils/formatters';
+import { useGoogleLogin, googleLogout } from '@react-oauth/google';
 
 interface HeaderProps {
   cloudUsedBytes: number;
@@ -10,8 +11,8 @@ interface HeaderProps {
   completedCount: number;
   totalBytesSaved: number;
   user?: any;
-  onLogin?: () => void;
-  onLogout?: () => void;
+  onLoginSuccess: (userInfo: any) => void;
+  onLogout: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -22,9 +23,27 @@ export const Header: React.FC<HeaderProps> = ({
   completedCount,
   totalBytesSaved,
   user,
-  onLogin,
+  onLoginSuccess,
   onLogout
 }) => {
+  const login = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      try {
+        const res = await fetch('https://www.googleapis.com/oauth2/v1/userinfo?access_token=' + tokenResponse.access_token);
+        const userInfo = await res.json();
+        onLoginSuccess(userInfo);
+      } catch (err) {
+        console.error('Failed to fetch user info', err);
+      }
+    },
+    onError: (error) => console.log('Login Failed:', error)
+  });
+
+  const handleLogout = () => {
+    googleLogout();
+    onLogout();
+  };
+
   const quotaPercent = Math.min(100, (cloudUsedBytes / cloudQuotaBytes) * 100);
 
   return (
@@ -80,10 +99,10 @@ export const Header: React.FC<HeaderProps> = ({
           {user ? (
             <div className="flex items-center gap-3">
               <span className="text-xs font-semibold text-slate-700 hidden md:block">
-                {user.displayName || user.email}
+                {user.name || user.email}
               </span>
               <button
-                onClick={onLogout}
+                onClick={handleLogout}
                 className="bg-slate-100 text-slate-700 px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold hover:bg-slate-200 transition-all border border-slate-200"
               >
                 Logout
@@ -91,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           ) : (
             <button
-              onClick={onLogin}
+              onClick={() => login()}
               className="bg-blue-600 text-white px-4 sm:px-5 py-2.5 rounded-lg text-xs sm:text-sm font-semibold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-sm"
             >
               Sign in with Google
