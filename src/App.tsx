@@ -484,6 +484,34 @@ export default function App() {
     return acc;
   }, 0);
 
+  const handleGlobalSettingsChange = (newSettings: CompressionSettings) => {
+    setGlobalSettings(newSettings);
+    // Automatically apply to all un-processed items in the queue
+    setQueue((prev) =>
+      prev.map((item) => {
+        if (item.status === 'completed' || item.status === 'processing') return item;
+        return {
+          ...item,
+          settings: {
+            ...item.settings,
+            quality: newSettings.quality,
+            resolution: newSettings.resolution,
+            keepAspectRatio: newSettings.keepAspectRatio,
+            outputFormat:
+              item.type === 'video'
+                ? newSettings.outputFormat === 'mp4'
+                  ? 'mp4'
+                  : 'webm'
+                : newSettings.outputFormat,
+            aspectRatio: newSettings.aspectRatio,
+            smartAiEnabled: newSettings.smartAiEnabled,
+            autoCleanup: newSettings.autoCleanup
+          }
+        };
+      })
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-slate-900 selection:text-white flex flex-col">
       {/* Toast Notification */}
@@ -519,7 +547,7 @@ export default function App() {
         {/* Compression Controls with Smart AI Toggle */}
         <CompressionControls
           settings={globalSettings}
-          onChangeSettings={setGlobalSettings}
+          onChangeSettings={handleGlobalSettingsChange}
           onApplyToAll={handleApplySettingsToAll}
           queueHasImages={queueHasImages}
           queueHasVideos={queueHasVideos}
